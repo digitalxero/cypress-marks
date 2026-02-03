@@ -57,7 +57,9 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm install -g npm@latest
+          npm ci
 
       - name: Lint
         run: npm run lint
@@ -133,22 +135,21 @@ jobs:
             echo "SKIP_RELEASE=false" >> $GITHUB_ENV
           fi
 
+      - name: Publish to npm
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
+        run: |
+          npm --no-git-tag-version version ${{ env.NEXT_VERSION }}
+          npm publish
+
       - name: Update version and commit
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          npm --no-git-tag-version version ${{ env.NEXT_VERSION }}
-
           git add package.json package-lock.json
           git commit -m "chore: release ${{ env.NEXT_VERSION }} [skip ci]"
           git tag -a "${{ env.NEXT_VERSION }}" -m "Release ${{ env.NEXT_VERSION }}"
           git push origin main --follow-tags
-
-      - name: Publish to npm
-        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
-        run: npm publish
 
       - name: Generate release notes
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
