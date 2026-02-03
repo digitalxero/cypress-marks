@@ -1,5 +1,9 @@
 # cypress-marks
 
+[![CI](https://github.com/digitalxero/cypress-marks/actions/workflows/ci.yml/badge.svg)](https://github.com/digitalxero/cypress-marks/actions/workflows/ci.yml)
+[![npm version](https://badge.fury.io/js/cypress-marks.svg)](https://www.npmjs.com/package/cypress-marks)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Cypress plugin that filters tests using pytest-style expression parsing, providing `--env tags` (like pytest `-m`) and `--env tests` (like pytest `-k`) options with full boolean expression support.
 
 ## Features
@@ -239,6 +243,72 @@ Note: Spec pre-filtering has limitations with dynamic test generation.
 | Name filtering | `-k 'login or logout'` | `--env tests='login or logout'` |
 | Boolean ops | `and`, `or`, `not`, `()` | `and`, `or`, `not`, `()` |
 | Tag prefix | No requirement | Must start with `@` |
+
+## Contributing
+
+### Development
+
+```bash
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Run tests with coverage
+npm run test:coverage
+
+# Build
+npm run build
+
+# Lint
+npm run lint
+
+# Type check
+npm run typecheck
+```
+
+### Release Process
+
+Releases are automated via GitHub Actions using [Conventional Commits](https://www.conventionalcommits.org/) and [svu](https://github.com/caarlos0/svu) for semantic versioning.
+
+**On Pull Request:**
+- Builds, tests, and lints
+- Publishes a release candidate to npm (e.g., `1.0.0-rc.feature-branch.42`)
+- Comments on the PR with the RC install command
+
+**On Merge to Main:**
+- Automatically determines the next version based on commit messages:
+  - `fix:` → patch bump (0.0.x)
+  - `feat:` → minor bump (0.x.0)
+  - `feat!:` or `BREAKING CHANGE:` → major bump (x.0.0)
+- Updates `package.json`, commits, and tags
+- Creates a GitHub Release with auto-generated notes
+- Publishes to npm
+
+**Commit Message Examples:**
+```bash
+# Patch release (0.0.1 → 0.0.2)
+git commit -m "fix: handle empty tag expressions correctly"
+
+# Minor release (0.1.0 → 0.2.0)
+git commit -m "feat: add support for regex patterns in test filter"
+
+# Major release (1.0.0 → 2.0.0)
+git commit -m "feat!: require @ prefix for all tags"
+# or
+git commit -m "feat: new API
+
+BREAKING CHANGE: removed deprecated compile() options"
+```
+
+### Required Secrets
+
+Add the `NPM_TOKEN` secret to your GitHub repository:
+
+1. Generate an npm access token at https://www.npmjs.com/settings/tokens (use "Automation" type)
+2. In your GitHub repo: Settings → Secrets and variables → Actions
+3. Add a new repository secret named `NPM_TOKEN`
 
 ## License
 

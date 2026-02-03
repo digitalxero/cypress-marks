@@ -1,0 +1,197 @@
+name: cypress-marks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find Comment
+        if: github.ref_name != 'main'
+        uses: peter-evans/find-comment@v3
+        id: fcu
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "📦 Release Candidate"
+
+      - name: Create or update comment (Building)
+        if: github.ref_name != 'main'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fcu.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            📦 **Release Candidate**
+            `Building...`
+          edit-mode: replace
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: Install SVU
+        run: |
+          go install github.com/caarlos0/svu@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Get next version
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          NEXT=$(svu next || echo v1.0.0)
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Current: $CURRENT, Next: $NEXT"
+
+      - name: Release Candidate
+        if: github.ref_name != 'main'
+        id: rc
+        run: |
+          # Create RC version: next-branch.sha
+          BRANCH=$(echo "${{ github.head_ref }}" | sed 's/[^a-zA-Z0-9]/-/g' | cut -c1-20)
+          RC_VERSION="${{ steps.version.outputs.next }}-rc.${BRANCH}.${{ github.run_number }}"
+          echo "version=${RC_VERSION}" >> "$GITHUB_OUTPUT"
+          npm --no-git-tag-version version ${RC_VERSION}
+
+      - name: Publish RC to npm
+        if: github.ref_name != 'main'
+        run: npm publish --provenance --access public --tag rc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true
+
+      - name: Find Comment
+        if: github.ref_name != 'main'
+        uses: peter-evans/find-comment@v3
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "📦 Release Candidate"
+
+      - name: Create or update comment (RC Ready)
+        if: github.ref_name != 'main'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            📦 **Release Candidate**
+            ```bash
+            npm install cypress-marks@${{ steps.rc.outputs.version }}
+            ```
+          edit-mode: replace
+
+      - name: Release Production
+        if: github.ref_name == 'main'
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          CURRENT="${{ steps.version.outputs.current }}"
+
+          if [ "$NEXT" = "$CURRENT" ]; then
+            echo "No version bump needed (current: $CURRENT)"
+            echo "SKIP_RELEASE=true" >> $GITHUB_ENV
+          else
+            echo "Bumping version from $CURRENT to $NEXT"
+            echo "NEXT_VERSION=$NEXT" >> $GITHUB_ENV
+            echo "SKIP_RELEASE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Update version and commit
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          npm --no-git-tag-version version ${{ env.NEXT_VERSION }}
+
+          git add package.json package-lock.json
+          git commit -m "chore: release v${{ env.NEXT_VERSION }} [skip ci]"
+          git tag -a "v${{ env.NEXT_VERSION }}" -m "Release v${{ env.NEXT_VERSION }}"
+          git push origin main --follow-tags
+
+      - name: Generate release notes
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
+        id: release-notes
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          else
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+
+          # Write release notes to file
+          cat > release-notes.md << EOF
+          ## What's Changed
+
+          $COMMITS
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-v0.0.0}...v${{ env.NEXT_VERSION }}
+          EOF
+
+      - name: Create GitHub Release
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.NEXT_VERSION }}
+          name: v${{ env.NEXT_VERSION }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skip release notice
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'true'
+        run: |
+          echo "No version bump detected. To trigger a release, use conventional commits:"
+          echo "  feat: ... (minor bump)"
+          echo "  fix: ...  (patch bump)"
+          echo "  feat!: ... or BREAKING CHANGE: (major bump)"
