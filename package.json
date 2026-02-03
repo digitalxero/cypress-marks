@@ -6,9 +6,6 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "repository": {
-    "url": "https://github.com/digitalxero/cypress-marks"
-  },
   "exports": {
     ".": {
       "import": {
@@ -58,7 +55,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/digitalxero/cypress-marks"
   },
   "peerDependencies": {
     "cypress": ">=10.0.0"
