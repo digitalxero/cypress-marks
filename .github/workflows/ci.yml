@@ -146,6 +146,10 @@ jobs:
           git tag -a "${{ env.NEXT_VERSION }}" -m "Release ${{ env.NEXT_VERSION }}"
           git push origin main --follow-tags
 
+      - name: Publish to npm
+        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
+        run: npm publish
+
       - name: Generate release notes
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
         id: release-notes
@@ -172,17 +176,13 @@ jobs:
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.NEXT_VERSION }}
-          name: v${{ env.NEXT_VERSION }}
+          tag_name: ${{ env.NEXT_VERSION }}
+          name: ${{ env.NEXT_VERSION }}
           body_path: release-notes.md
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to npm
-        if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
-        run: npm publish
 
       - name: Skip release notice
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'true'
