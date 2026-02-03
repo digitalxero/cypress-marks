@@ -302,13 +302,21 @@ git commit -m "feat: new API
 BREAKING CHANGE: removed deprecated compile() options"
 ```
 
-### Required Secrets
+### npm Trusted Publishing Setup
 
-Add the `NPM_TOKEN` secret to your GitHub repository:
+This project uses [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) with GitHub Actions OIDC - no npm tokens required.
 
-1. Generate an npm access token at https://www.npmjs.com/settings/tokens (use "Automation" type)
-2. In your GitHub repo: Settings → Secrets and variables → Actions
-3. Add a new repository secret named `NPM_TOKEN`
+**Initial Setup (one-time):**
+1. Manually publish the first version: `npm login && npm publish --access public`
+2. Go to https://www.npmjs.com/package/cypress-marks/access
+3. Scroll to "Trusted Publishers" and click "Add Trusted Publisher"
+4. Select "GitHub Actions" and configure:
+   - Repository owner: `digitalxero`
+   - Repository name: `cypress-marks`
+   - Workflow filename: `ci.yml`
+   - Environment: (leave blank)
+
+After setup, all future publishes happen automatically via OIDC authentication.
 
 ## License
 

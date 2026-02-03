@@ -93,9 +93,7 @@ jobs:
 
       - name: Publish RC to npm
         if: github.ref_name != 'main'
-        run: npm publish --provenance --access public --tag rc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag rc
         continue-on-error: true
 
       - name: Find Comment
@@ -184,9 +182,7 @@ jobs:
 
       - name: Publish to npm
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       - name: Skip release notice
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'true'

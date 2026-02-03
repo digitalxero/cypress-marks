@@ -1,6 +1,6 @@
 {
-  "name": "cypress-marks",
-  "version": "0.1.0",
+  "name": "@djgilcrease/cypress-marks",
+  "version": "0.0.0",
   "description": "Cypress plugin for pytest-style test filtering with boolean expressions",
   "type": "module",
   "main": "./dist/index.cjs",
