@@ -93,7 +93,7 @@ jobs:
 
       - name: Publish RC to npm
         if: github.ref_name != 'main'
-        run: npm publish --access public --tag rc
+        run: npm publish
         continue-on-error: true
 
       - name: Find Comment
@@ -182,7 +182,7 @@ jobs:
 
       - name: Publish to npm
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'false'
-        run: npm publish --access public
+        run: npm publish
 
       - name: Skip release notice
         if: github.ref_name == 'main' && env.SKIP_RELEASE == 'true'
