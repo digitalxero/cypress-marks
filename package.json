@@ -1,0 +1,78 @@
+{
+  "name": "cypress-marks",
+  "version": "0.1.0",
+  "description": "Cypress plugin for pytest-style test filtering with boolean expressions",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./plugin": {
+      "import": {
+        "types": "./dist/plugin.d.ts",
+        "default": "./dist/plugin.js"
+      },
+      "require": {
+        "types": "./dist/plugin.d.cts",
+        "default": "./dist/plugin.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cypress",
+    "testing",
+    "test-filtering",
+    "tags",
+    "marks",
+    "pytest",
+    "boolean-expressions"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "peerDependencies": {
+    "cypress": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "cypress": "^13.0.0",
+    "eslint": "^9.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  },
+  "optionalDependencies": {
+    "find-test-names": "^1.0.0",
+    "globby": "^14.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

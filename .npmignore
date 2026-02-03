@@ -1,0 +1,19 @@
+# Source
+src/
+tests/
+
+# Config
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+
+# Coverage
+coverage/
+
+# Test artifacts
+cypress/
