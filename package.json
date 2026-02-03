@@ -72,7 +72,6 @@
     "vitest": "^2.0.0"
   },
   "optionalDependencies": {
-    "find-test-names": "^1.0.0",
     "globby": "^14.0.0"
   },
   "engines": {

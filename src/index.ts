@@ -22,6 +22,13 @@ export {
   createCombinedMatcher,
   processPattern,
   TagValidationError,
+  // Path matching utilities
+  parsePathSpec,
+  parsePathSpecs,
+  matchesFile,
+  matchesTest,
+  createPathFilter,
+  shouldIncludeByPath,
 } from './matchers/index.js';
 
 // Re-export types
@@ -31,6 +38,8 @@ export type {
   TestConfig,
   CypressTestOptions,
   CypressSuiteOptions,
+  PathSpec,
+  PathFilter,
 } from './types/index.js';
 
 // Cypress type augmentations are in types/cypress.d.ts

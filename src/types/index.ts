@@ -1,4 +1,5 @@
 export type { Expression, Matcher } from '../expression/types.js';
+export type { PathSpec, PathFilter } from '../matchers/path-matcher.js';
 
 /**
  * Options for the register function
