@@ -11,3 +11,14 @@ export {
   createCombinedMatcher,
   processPattern,
 } from './name-matcher.js';
+
+export {
+  parsePathSpec,
+  parsePathSpecs,
+  matchesFile,
+  matchesTest,
+  createPathFilter,
+  shouldIncludeByPath,
+} from './path-matcher.js';
+
+export type { PathSpec, PathFilter } from './path-matcher.js';

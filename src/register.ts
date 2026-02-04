@@ -4,6 +4,12 @@ import { compile } from './expression/evaluator.js';
 import type { Expression } from './expression/types.js';
 import { createTagMatcher, validateTags } from './matchers/tag-matcher.js';
 import { createNameMatcher } from './matchers/name-matcher.js';
+import {
+  matchesFile,
+  shouldIncludeByPath,
+  type PathSpec,
+  type PathFilter,
+} from './matchers/path-matcher.js';
 
 interface SuiteContext {
   name: string;
@@ -13,6 +19,7 @@ interface SuiteContext {
 interface FilterContext {
   tagsExpression: Expression | null;
   testsExpression: Expression | null;
+  pathFilter: PathFilter | null;
   omitFiltered: boolean;
   debug: boolean;
   suiteStack: SuiteContext[];
@@ -64,9 +71,21 @@ function collectTags(suiteStack: SuiteContext[], testTags: string[]): Set<string
 function shouldIncludeTest(
   ctx: FilterContext,
   fullName: string,
-  tags: Set<string>
+  tags: Set<string>,
+  suiteNames: string[],
+  testName: string
 ): boolean {
-  // Check tags expression
+  // Check path filter first (if specified)
+  if (ctx.pathFilter) {
+    if (!shouldIncludeByPath(ctx.pathFilter, suiteNames, testName)) {
+      if (ctx.debug) {
+        console.log(`[cypress-marks] Filtering out test "${fullName}" - path doesn't match`);
+      }
+      return false;
+    }
+  }
+
+  // Check tags expression (AND with path filter)
   if (ctx.tagsExpression) {
     const tagMatcher = createTagMatcher(tags);
     if (!ctx.tagsExpression.evaluate(tagMatcher)) {
@@ -77,7 +96,7 @@ function shouldIncludeTest(
     }
   }
 
-  // Check tests expression
+  // Check tests expression (AND with path filter and tags)
   if (ctx.testsExpression) {
     const nameMatcher = createNameMatcher(fullName);
     if (!ctx.testsExpression.evaluate(nameMatcher)) {
@@ -125,6 +144,7 @@ type DescribeFunction = Mocha.SuiteFunction;
  * ```bash
  * npx cypress run --env tags='@smoke and not @slow'
  * npx cypress run --env tests='login'
+ * npx cypress run --env spec='login.cy.ts::Auth::test'
  * npx cypress run --env tags='@smoke',marksOmitFiltered=true
  * ```
  */
@@ -135,12 +155,96 @@ export function register(): void {
   const omitFiltered = Cypress.env('marksOmitFiltered') === true || Cypress.env('marksOmitFiltered') === 'true';
   const debug = Cypress.env('marksDebug') === true || Cypress.env('marksDebug') === 'true';
 
+  // Read path filters from plugin (if spec filtering was enabled)
+  const pathFiltersJson = Cypress.env('_marksPathFilters') as string | undefined;
+  // Read raw path specs (if spec filtering was disabled)
+  const pathSpecsJson = Cypress.env('_marksPathSpecs') as string | undefined;
+
   // Compile expressions
   const tagsExpression = tagsExpr ? compile(tagsExpr) : null;
   const testsExpression = testsExpr ? compile(testsExpr) : null;
 
+  // Resolve path filter for current spec file
+  let pathFilter: PathFilter | null = null;
+
+  // Helper to check if two paths refer to the same file
+  // Handles absolute vs relative path comparison
+  const pathsReferToSameFile = (path1: string, path2: string): boolean => {
+    const norm1 = path1.replace(/\\/g, '/');
+    const norm2 = path2.replace(/\\/g, '/');
+    // Exact match
+    if (norm1 === norm2) return true;
+    // One ends with the other (handles absolute vs relative)
+    if (norm1.endsWith('/' + norm2) || norm2.endsWith('/' + norm1)) return true;
+    // Compare just filenames as last resort
+    const file1 = norm1.split('/').pop() || '';
+    const file2 = norm2.split('/').pop() || '';
+    // Only match by filename if both have same parent directory structure
+    // This prevents false matches between files with same name in different dirs
+    if (file1 === file2) {
+      // Check if the shorter path is a suffix of the longer one
+      const shorter = norm1.length < norm2.length ? norm1 : norm2;
+      const longer = norm1.length < norm2.length ? norm2 : norm1;
+      return longer.endsWith(shorter);
+    }
+    return false;
+  };
+
+  if (pathFiltersJson) {
+    // Path filters from spec filtering (already filtered per-file)
+    try {
+      const pathFilters = JSON.parse(pathFiltersJson) as PathFilter[];
+      const currentSpec = Cypress.spec.relative || Cypress.spec.absolute;
+      if (debug) {
+        console.log(`[cypress-marks] Current spec: ${currentSpec}`);
+        console.log(`[cypress-marks] Looking for path filter among ${pathFilters.length} filter(s)`);
+      }
+      // Find the filter that matches this spec file
+      for (const filter of pathFilters) {
+        if (debug) {
+          console.log(`[cypress-marks]   Checking filter specFile: ${filter.specFile}`);
+        }
+        if (pathsReferToSameFile(currentSpec, filter.specFile)) {
+          pathFilter = filter;
+          if (debug) {
+            console.log(`[cypress-marks]   -> Match found! Filter has ${filter.specs.length} spec(s)`);
+          }
+          break;
+        }
+      }
+      if (debug && !pathFilter) {
+        console.log(`[cypress-marks] No matching path filter found for ${currentSpec}`);
+      }
+    } catch (e) {
+      if (debug) {
+        console.log(`[cypress-marks] Error parsing path filters: ${e}`);
+      }
+    }
+  } else if (pathSpecsJson) {
+    // Raw path specs (no spec filtering, do it here)
+    try {
+      const pathSpecs = JSON.parse(pathSpecsJson) as PathSpec[];
+      const currentSpec = Cypress.spec.relative || Cypress.spec.absolute;
+      // Filter specs that match this file
+      const matchingSpecs = pathSpecs.filter(spec => matchesFile(currentSpec, spec));
+      if (matchingSpecs.length > 0) {
+        pathFilter = {
+          specFile: currentSpec,
+          specs: matchingSpecs,
+        };
+        if (debug) {
+          console.log(`[cypress-marks] Created path filter for ${currentSpec} with ${matchingSpecs.length} spec(s)`);
+        }
+      }
+    } catch (e) {
+      if (debug) {
+        console.log(`[cypress-marks] Error parsing path specs: ${e}`);
+      }
+    }
+  }
+
   // If no filters, nothing to do
-  if (!tagsExpression && !testsExpression) {
+  if (!tagsExpression && !testsExpression && !pathFilter) {
     if (debug) {
       console.log('[cypress-marks] No filters configured, all tests will run');
     }
@@ -151,6 +255,7 @@ export function register(): void {
   filterContext = {
     tagsExpression,
     testsExpression,
+    pathFilter,
     omitFiltered,
     debug,
     suiteStack: [],
@@ -160,6 +265,7 @@ export function register(): void {
     console.log('[cypress-marks] Registering with filters:');
     if (tagsExpr) console.log(`  tags: ${tagsExpr}`);
     if (testsExpr) console.log(`  tests: ${testsExpr}`);
+    if (pathFilter) console.log(`  path specs: ${pathFilter.specs.length}`);
     console.log(`  omitFiltered: ${omitFiltered}`);
   }
 
@@ -188,8 +294,9 @@ export function register(): void {
     const testTags = getTagsFromConfig(config);
     const fullName = buildFullName(ctx.suiteStack, title);
     const allTags = collectTags(ctx.suiteStack, testTags);
+    const suiteNames = ctx.suiteStack.map(s => s.name);
 
-    const shouldInclude = shouldIncludeTest(ctx, fullName, allTags);
+    const shouldInclude = shouldIncludeTest(ctx, fullName, allTags, suiteNames, title);
 
     if (!shouldInclude) {
       if (ctx.omitFiltered) {

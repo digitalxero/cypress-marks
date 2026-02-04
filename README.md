@@ -10,6 +10,7 @@ A Cypress plugin that filters tests using pytest-style expression parsing, provi
 
 - **Tag filtering**: `--env tags='@smoke and not @slow'`
 - **Test name filtering**: `--env tests='login or logout'`
+- **Path filtering**: `--env spec='file.cy.ts::Suite::test'` (pytest-style)
 - **Boolean expressions**: Full support for `and`, `or`, `not`, and parentheses
 - **Hierarchical tags**: Tags inherit through describe blocks
 - **Underscore mapping**: `test_login` matches "test login" in test names
@@ -33,9 +34,9 @@ import { register } from 'cypress-marks';
 register();
 ```
 
-### 2. Configure plugin (optional)
+### 2. Configure plugin (optional, enables spec pre-filtering)
 
-For spec pre-filtering, add to your `cypress.config.ts`:
+Add to your `cypress.config.ts`:
 
 ```typescript
 import { defineConfig } from 'cypress';
@@ -43,11 +44,28 @@ import { plugin } from 'cypress-marks/plugin';
 
 export default defineConfig({
   e2e: {
-    setupNodeEvents(on, config) {
-      return plugin(on, config);
+    // IMPORTANT: Must be async and await the plugin!
+    async setupNodeEvents(on, config) {
+      ...
+      config = await plugin(on, config);
+
+      return config
     },
   },
 });
+```
+
+**Common mistakes:**
+```typescript
+// WRONG - not async, not awaiting
+setupNodeEvents(on, config) {
+  return plugin(on, config);  // Returns Promise, not config!
+}
+
+// WRONG - not returning the config
+setupNodeEvents(on, config) {
+  plugin(on, config);  // Config modifications are lost!
+}
 ```
 
 ## Usage
@@ -115,6 +133,46 @@ To match literal underscores, escape them:
 npx cypress run --env tests='user\_auth'
 ```
 
+### Path Filtering (Pytest-Style)
+
+Select specific tests using pytest-style `::` separated paths:
+
+```bash
+# Run all tests in a specific file
+npx cypress run --env spec='login.cy.ts'
+
+# Run all tests in a specific suite
+npx cypress run --env spec='login.cy.ts::User Authentication'
+
+# Run a specific test
+npx cypress run --env spec='login.cy.ts::User Authentication::should login successfully'
+
+# Nested suite hierarchy
+npx cypress run --env spec='login.cy.ts::Auth::Login::validates credentials'
+
+# Use glob patterns for files
+npx cypress run --env spec='**/auth/*.cy.ts::smoke'
+
+# Multiple files/tests (OR logic)
+npx cypress run --env spec='login.cy.ts::login,logout.cy.ts::logout'
+```
+
+#### Path Syntax
+
+| Pattern | Description |
+|---------|-------------|
+| `file.cy.ts` | Run all tests in the file |
+| `file.cy.ts::Suite` | Run all tests in the suite (case-insensitive substring match) |
+| `file.cy.ts::Suite::test` | Run specific test (case-insensitive substring match) |
+| `file.cy.ts::Outer::Inner::test` | Nested suite path |
+| `**/*.cy.ts::Suite` | Glob pattern with suite filter |
+
+**Key behaviors:**
+- File path component uses glob matching (supports `*` and `**`)
+- Suite/test names use case-insensitive substring matching
+- Literal spaces are supported directly in names
+- Multiple specs separated by commas use OR logic
+
 ### Combined Filtering
 
 Use both tag and name filters together:
@@ -123,7 +181,14 @@ Use both tag and name filters together:
 npx cypress run --env tags='@smoke',tests='login'
 ```
 
-Both conditions must match for a test to run.
+Combine path filtering with tag filtering:
+
+```bash
+# Run smoke tests in auth files
+npx cypress run --env spec='**/auth/*.cy.ts',tags='@smoke'
+```
+
+All specified conditions must match for a test to run (AND logic between filter types).
 
 ### Filter Mode
 
@@ -178,10 +243,11 @@ From highest to lowest:
 
 | Variable | Type | Description |
 |----------|------|-------------|
+| `spec` | string | Pytest-style path filter (file::suite::test) |
 | `tags` | string | Tag filter expression |
 | `tests` | string | Test name filter expression |
 | `marksOmitFiltered` | boolean | Omit filtered tests vs skip (default: false) |
-| `marksFilterSpecs` | boolean | Pre-filter spec files (default: false) |
+| `marksFilterSpecs` | boolean | Pre-filter spec files (default: false, auto-enabled when `spec` is set) |
 | `marksDebug` | boolean | Enable debug logging (default: false) |
 
 ## Tag Requirements
@@ -227,13 +293,27 @@ const matches = expr.evaluate(matcher); // true
 
 ## Spec Pre-Filtering
 
-When `marksFilterSpecs` is enabled, the plugin will pre-scan spec files and exclude those with no matching tests. This requires the optional dependencies:
+When `marksFilterSpecs=true`, the plugin pre-scans spec files and excludes those with no matching tests. This prevents empty spec runs.
 
+**Required dependency:**
 ```bash
-npm install find-test-names globby --save-dev
+npm install globby --save-dev
 ```
 
-Note: Spec pre-filtering has limitations with dynamic test generation.
+**Usage:**
+```bash
+npx cypress run --env tags='@smoke',marksFilterSpecs=true
+```
+
+**How it works:**
+1. Parses each spec file to extract test names and tags (including inherited suite tags)
+2. Evaluates the filter expression against each test
+3. Excludes spec files where no tests would match
+4. Updates `config.specPattern` with only the matching specs
+
+**Limitations:**
+- Dynamic test generation (tests created at runtime) cannot be detected
+- The parser handles standard `describe`/`context`/`it`/`specify` syntax with `{ tags: [] }` config
 
 ## Comparison with pytest
 
@@ -241,6 +321,7 @@ Note: Spec pre-filtering has limitations with dynamic test generation.
 |---------|--------|---------------|
 | Tag filtering | `-m 'smoke and not slow'` | `--env tags='@smoke and not @slow'` |
 | Name filtering | `-k 'login or logout'` | `--env tests='login or logout'` |
+| Path selection | `file.py::Class::test` | `--env spec='file.cy.ts::Suite::test'` |
 | Boolean ops | `and`, `or`, `not`, `()` | `and`, `or`, `not`, `()` |
 | Tag prefix | No requirement | Must start with `@` |
 
@@ -305,18 +386,6 @@ BREAKING CHANGE: removed deprecated compile() options"
 ### npm Trusted Publishing Setup
 
 This project uses [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) with GitHub Actions OIDC - no npm tokens required.
-
-**Initial Setup (one-time):**
-1. Manually publish the first version: `npm login && npm publish --access public`
-2. Go to https://www.npmjs.com/package/cypress-marks/access
-3. Scroll to "Trusted Publishers" and click "Add Trusted Publisher"
-4. Select "GitHub Actions" and configure:
-   - Repository owner: `digitalxero`
-   - Repository name: `cypress-marks`
-   - Workflow filename: `ci.yml`
-   - Environment: (leave blank)
-
-After setup, all future publishes happen automatically via OIDC authentication.
 
 ## License
 
