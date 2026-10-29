@@ -20,6 +20,12 @@ const scenarios = [
     passing: 2, pending: 1, specs: 1,
     titles: [['Auth', 'login'], ['Auth', 'slow login']],
   },
+  {
+    name: 'env raw path fallback',
+    env: { spec: 'auth.cy.js::Auth::login', _marksTestRawPaths: true },
+    passing: 2, pending: 2, specs: 2,
+    titles: [['Auth', 'login'], ['Auth', 'slow login']],
+  },
 ];
 
 const [major, minor] = version.split('.').map(Number);
@@ -39,7 +45,11 @@ if (major > 15 || (major === 15 && minor >= 10)) {
   });
 }
 
-for (const scenario of scenarios) {
+const requested = process.argv.slice(2);
+const selected = requested.length ? scenarios.filter(scenario => requested.includes(scenario.name)) : scenarios;
+assert.equal(selected.length, requested.length || scenarios.length, 'Unknown or duplicate compatibility scenario');
+
+for (const scenario of selected) {
   process.stdout.write(`\nCypress ${version}: ${scenario.name}\n`);
   const result = await cypress.run({
     project,
@@ -63,4 +73,4 @@ for (const scenario of scenarios) {
   }
 }
 
-process.stdout.write(`\nAll ${scenarios.length} compatibility scenarios passed on Cypress ${version}.\n`);
+process.stdout.write(`\nAll ${selected.length} compatibility scenarios passed on Cypress ${version}.\n`);

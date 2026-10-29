@@ -7,7 +7,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function setup(values: Record<string, unknown>, modern = true) {
+function setup(values: Record<string, unknown>, modern = true, specFile = 'cypress/e2e/auth.cy.ts') {
   const env = vi.fn((key: string) => {
     if (modern) throw new Error('Cypress.env() was removed in Cypress 16');
     return values[key];
@@ -30,7 +30,7 @@ function setup(values: Record<string, unknown>, modern = true) {
   vi.stubGlobal('Cypress', {
     env,
     ...(modern ? { expose } : {}),
-    spec: { relative: 'cypress/e2e/auth.cy.ts', absolute: '/project/cypress/e2e/auth.cy.ts' },
+    spec: { relative: specFile, absolute: `/project/${specFile}` },
   });
   vi.stubGlobal('it', originalIt);
   vi.stubGlobal('describe', suite);
@@ -110,5 +110,15 @@ describe('register configuration compatibility', () => {
     expect(run.mock.calls.map(call => call[0])).toEqual(['login']);
     expect(skip.mock.calls.map(call => call[0])).toEqual(['logout']);
     if (modern) expect(env).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('filters files outside raw path selection with modern API=%s', (modern) => {
+    const { run, skip } = setup({
+      _marksPathSpecs: JSON.stringify(parsePathSpecs('auth.cy.ts::Auth::login')),
+    }, modern, 'cypress/e2e/other.cy.ts');
+    register();
+    globalThis.it('other test', () => {});
+    expect(run).not.toHaveBeenCalled();
+    expect(skip).toHaveBeenCalledWith('other test');
   });
 });

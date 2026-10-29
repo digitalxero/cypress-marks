@@ -239,14 +239,13 @@ export function register(): void {
       const currentSpec = Cypress.spec.relative || Cypress.spec.absolute;
       // Filter specs that match this file
       const matchingSpecs = pathSpecs.filter(spec => matchesFile(currentSpec, spec));
-      if (matchingSpecs.length > 0) {
-        pathFilter = {
-          specFile: currentSpec,
-          specs: matchingSpecs,
-        };
-        if (debug) {
-          console.log(`[cypress-marks] Created path filter for ${currentSpec} with ${matchingSpecs.length} spec(s)`);
-        }
+      // An empty filter excludes every test in a file outside the selection.
+      pathFilter = {
+        specFile: currentSpec,
+        specs: matchingSpecs,
+      };
+      if (debug) {
+        console.log(`[cypress-marks] Created path filter for ${currentSpec} with ${matchingSpecs.length} spec(s)`);
       }
     } catch (e) {
       if (debug) {
