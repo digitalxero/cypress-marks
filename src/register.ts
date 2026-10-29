@@ -126,6 +126,16 @@ function debugLog(message: string): void {
 type ItFunction = Mocha.TestFunction;
 type DescribeFunction = Mocha.SuiteFunction;
 
+/** Read public settings without calling the removed env API on Cypress 16. */
+function readSetting(key: string): unknown {
+  // Keep compatibility with Cypress versions whose types predate expose().
+  const cypress = Cypress as unknown as {
+    expose?: (key: string) => unknown;
+    env: (key: string) => unknown;
+  };
+  return typeof cypress.expose === 'function' ? cypress.expose(key) : cypress.env(key);
+}
+
 /**
  * Register cypress-marks with Cypress.
  *
@@ -149,16 +159,18 @@ type DescribeFunction = Mocha.SuiteFunction;
  * ```
  */
 export function register(): void {
-  // Read configuration from Cypress environment
-  const tagsExpr = Cypress.env('tags') as string | undefined;
-  const testsExpr = Cypress.env('tests') as string | undefined;
-  const omitFiltered = Cypress.env('marksOmitFiltered') === true || Cypress.env('marksOmitFiltered') === 'true';
-  const debug = Cypress.env('marksDebug') === true || Cypress.env('marksDebug') === 'true';
+  // Read exposed configuration, or env on older Cypress versions.
+  const tagsExpr = readSetting('tags') as string | undefined;
+  const testsExpr = readSetting('tests') as string | undefined;
+  const omitSetting = readSetting('marksOmitFiltered');
+  const debugSetting = readSetting('marksDebug');
+  const omitFiltered = omitSetting === true || omitSetting === 'true';
+  const debug = debugSetting === true || debugSetting === 'true';
 
   // Read path filters from plugin (if spec filtering was enabled)
-  const pathFiltersJson = Cypress.env('_marksPathFilters') as string | undefined;
+  const pathFiltersJson = readSetting('_marksPathFilters') as string | undefined;
   // Read raw path specs (if spec filtering was disabled)
-  const pathSpecsJson = Cypress.env('_marksPathSpecs') as string | undefined;
+  const pathSpecsJson = readSetting('_marksPathSpecs') as string | undefined;
 
   // Compile expressions
   const tagsExpression = tagsExpr ? compile(tagsExpr) : null;
@@ -307,11 +319,13 @@ export function register(): void {
       } else {
         // Skip the test (shows as pending)
         debugLog(`Skipping test: ${fullName}`);
+        // A missing callback registers a pending Mocha test. Cypress's skip()
+        // calls the global it() again, which would recurse into this wrapper.
         if (config) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (originalIt.skip as any)(title, config, testFn);
+          return (originalIt as any)(title, config, undefined);
         }
-        return originalIt.skip(title, testFn);
+        return originalIt(title);
       }
     }
 

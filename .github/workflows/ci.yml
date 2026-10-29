@@ -25,9 +25,29 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+  compatibility:
+    name: Cypress ${{ matrix.cypress }} compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cypress: ['13.17.0', '15.10.0', '16.0.0', '16.2.1']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+        env:
+          CYPRESS_INSTALL_BINARY: '0'
+      - run: npm install --no-save --package-lock=false cypress@${{ matrix.cypress }}
+      - run: npx cypress install
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run test:e2e
   release:
     name: Publish verified version tag
-    needs: build
+    needs: [build, compatibility]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:

@@ -34,7 +34,9 @@ import { register } from 'cypress-marks';
 register();
 ```
 
-### 2. Configure plugin (optional, enables spec pre-filtering)
+### 2. Configure plugin
+
+On Cypress 15.10+ and 16, configure the plugin to keep existing `--env` filter commands working. It copies cypress-marks settings into `config.expose` for the browser. On older Cypress versions, the plugin is optional unless you use spec pre-filtering or path selection.
 
 Add to your `cypress.config.ts`:
 
@@ -67,6 +69,20 @@ setupNodeEvents(on, config) {
   plugin(on, config);  // Config modifications are lost!
 }
 ```
+
+### Cypress 16 compatibility
+
+The browser reads `Cypress.expose()` when available, falling back to `Cypress.env()` only on older Cypress versions. Cypress 16 removed `Cypress.env()`.
+
+The plugin reads each setting from `config.expose` first, then `config.env`. Existing commands such as `--env tags='@protect and not (@sso or @slow)'` keep working when the plugin is configured. Only `spec`, `tags`, `tests`, `marksFilterSpecs`, `marksOmitFiltered`, and `marksDebug` are copied; unrelated environment values are not copied into `expose`. Generated path filters are also exposed. These settings are mirrored into `config.env` for older Cypress versions.
+
+On Cypress 15.10+, you can also set public filters directly:
+
+```bash
+npx cypress run --expose tags='@smoke',tests='login',marksOmitFiltered=true
+```
+
+Or use `expose: { tags: '@smoke', tests: 'login' }` in `cypress.config.ts`. For tag/name filtering without the Node plugin, supply the settings through `expose` directly.
 
 ## Usage
 
@@ -341,6 +357,9 @@ npm run test:coverage
 
 # Build
 npm run build
+
+# Run real Cypress compatibility checks
+npm run test:e2e
 
 # Lint
 npm run lint
