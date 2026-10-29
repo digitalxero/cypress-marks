@@ -7,6 +7,23 @@ Existing licenses remain authoritative; new otherwise-unspecified work uses MIT.
 Use the existing project's release pipeline when it already uses svu and chglog.
 The standalone fallback below does not replace project-specific packaging.
 
+## cypress-marks automatic release
+
+Every push to `main` runs build/unit checks and the complete Cypress browser
+matrix. Once those succeed, the `ci.yml` release job chooses the next version
+with pinned svu, generates chglog notes, updates npm metadata in its workspace,
+tags the verified source commit, publishes to npm with OIDC provenance, and
+creates the GitHub release. It does not commit or push version changes to main.
+
+Tagging and publishing occur in the same job. No tag-triggered workflow is
+needed. Rerun a failed release job, or dispatch `ci.yml` on main, to resume a
+partial release: an existing tag is reused and a version already published from
+that commit is not published again. A newer main commit supersedes an older
+release run. All release jobs share a concurrency group without cancellation
+of an active release.
+
+## Standalone manual fallback
+
 1. Fetch current tags: `git fetch --tags origin`.
 2. Install tools: `python3 .repo-policy/release.py install`.
 3. Inspect the next version: `python3 .repo-policy/release.py next`.
