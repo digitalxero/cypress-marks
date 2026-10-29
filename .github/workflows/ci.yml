@@ -44,9 +44,21 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run test:e2e
+  windows-release-tests:
+    name: Windows release tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+        env:
+          CYPRESS_INSTALL_BINARY: '0'
+      - run: npm test -- tests/release/workflow.test.ts
   release:
     name: Tag and publish verified main
-    needs: [build, compatibility]
+    needs: [build, compatibility, windows-release-tests]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     concurrency:

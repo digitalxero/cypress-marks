@@ -1,23 +1,31 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 const workflow = parse(readFileSync('.github/workflows/ci.yml', 'utf8'));
 const releaseScript = resolve('.repo-policy/npm-release.mjs');
-const realGit = realpathSync(execFileSync('which', ['git'], { encoding: 'utf8' }).trim());
-const realNpm = realpathSync(execFileSync('which', ['npm'], { encoding: 'utf8' }).trim());
+const realGit = 'git';
+const nodeDirectory = dirname(process.execPath);
+const realNpm = [
+  process.env.npm_execpath,
+  join(nodeDirectory, 'node_modules/npm/bin/npm-cli.js'),
+  resolve(nodeDirectory, '../lib/node_modules/npm/bin/npm-cli.js'),
+].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+if (!realNpm) throw new Error('Cannot locate npm CLI; run the tests with npm test.');
 let root: string;
 let checkout: string;
 let origin: string;
 let sha: string;
 let environment: NodeJS.ProcessEnv;
+let preload: string;
 
 function git(...args: string[]): string {
-  return execFileSync(realGit, args, { cwd: checkout, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  return execFileSync(realGit, args, { cwd: checkout, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).replace(/\r\n/g, '\n').trim();
 }
 
 function control(value: Record<string, unknown> = {}): void {
@@ -33,13 +41,24 @@ function calls(): string[][] {
 }
 
 function release(overrides: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [releaseScript], {
+  return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, releaseScript], {
     cwd: checkout, env: { ...environment, ...overrides }, encoding: 'utf8', timeout: 20_000,
   });
 }
 
-beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'cypress-marks-release-'));
+function freshCheckout(): void {
+  rmSync(checkout, { recursive: true, force: true, maxRetries: 3 });
+  execFileSync(realGit, ['clone', '--branch', 'main', origin, checkout], { stdio: 'pipe' });
+  git('checkout', '--detach', sha);
+  expect(git('rev-parse', 'HEAD')).toBe(sha);
+  expect(JSON.parse(readFileSync(join(checkout, 'package.json'), 'utf8')).version).toBe('0.2.0');
+  expect(existsSync(join(checkout, 'changelog.yml'))).toBe(false);
+  expect(existsSync(join(checkout, 'release-notes.md'))).toBe(false);
+  expect(existsSync(join(checkout, 'dist'))).toBe(false);
+}
+
+function setupFixture(): void {
+  root = mkdtempSync(join(tmpdir(), 'cypress marks release-'));
   checkout = join(root, 'checkout');
   origin = join(root, 'origin.git');
   mkdirSync(checkout);
@@ -69,34 +88,32 @@ beforeEach(() => {
   writeFileSync(join(root, 'state.json'), JSON.stringify({ published: {}, releases: [] }));
   writeFileSync(join(root, 'calls.jsonl'), '');
   control();
-  const bin = join(root, 'bin');
-  mkdirSync(bin);
-  const fake = join(bin, 'fake.mjs');
-  writeFileSync(fake, `#!/usr/bin/env node
+  preload = join(root, 'mock-commands.mjs');
+  writeFileSync(preload, `
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const originalSpawnSync = childProcess.spawnSync;
+childProcess.spawnSync = (tool, args, options) => {
 const root = process.env.RELEASE_FIXTURE;
-const tool = basename(process.argv[1]);
-const args = process.argv.slice(2);
+const result = (stdout = '', status = 0, stderr = '') => ({ stdout, stderr, status, signal: null });
 appendFileSync(join(root, 'calls.jsonl'), JSON.stringify([tool, ...args]) + '\\n');
 const settings = JSON.parse(readFileSync(join(root, 'control.json')));
 const state = JSON.parse(readFileSync(join(root, 'state.json')));
 const save = () => writeFileSync(join(root, 'state.json'), JSON.stringify(state));
-if (settings.fail === tool + ':' + args[0]) { process.stderr.write('injected failure'); process.exit(42); }
+if (settings.fail === tool + ':' + args[0]) return result('', 42, 'injected failure');
 if (process.env.MARKS_REAL_RELEASE_TOOL_DIR && ['svu', 'chglog'].includes(tool)) {
-  const result = spawnSync(join(process.env.MARKS_REAL_RELEASE_TOOL_DIR, tool), args, { stdio: 'inherit' });
-  process.exit(result.status ?? 1);
+  return originalSpawnSync(join(process.env.MARKS_REAL_RELEASE_TOOL_DIR, tool), args, options);
 }
 if (tool === 'git') {
-  if (args[0] === 'ls-remote' && state.mainMoved) { process.stdout.write('a'.repeat(40) + '\\trefs/heads/main\\n'); process.exit(0); }
-  const result = spawnSync(process.env.REAL_GIT, args, { stdio: 'inherit' });
-  process.exit(result.status ?? 1);
+  if (args[0] === 'ls-remote' && state.mainMoved) return result('a'.repeat(40) + '\\trefs/heads/main\\n');
+  return originalSpawnSync(process.env.REAL_GIT, args, options);
 }
-if (tool === 'svu') { process.stdout.write(args[0] === 'current' ? 'v0.2.0' : settings.next ?? 'v0.2.1'); }
+if (tool === 'svu') return result(args[0] === 'current' ? 'v0.2.0' : settings.next ?? 'v0.2.1');
 else if (tool === 'chglog') {
   if (args[0] === 'init') {
-    const tags = spawnSync(process.env.REAL_GIT, ['tag', '--list'], { encoding: 'utf8' }).stdout.trim().split('\\n');
+    const tags = originalSpawnSync(process.env.REAL_GIT, ['tag', '--list'], { encoding: 'utf8' }).stdout.trim().split(/\\r?\\n/);
     writeFileSync('changelog.yml', JSON.stringify(tags.map(tag => ({ semver: tag.slice(1) }))));
   }
   if (args[0] === 'add') {
@@ -108,22 +125,21 @@ else if (tool === 'chglog') {
 }
 else if (tool === 'npm') {
   if (args[0] === 'view') {
-    if (args[2] === 'versions') process.stdout.write(JSON.stringify(['0.2.0', ...Object.keys(state.published)]));
+    if (args[2] === 'versions') return result(JSON.stringify(['0.2.0', ...Object.keys(state.published)]));
     else {
       const version = args[1].split('@').at(-1);
-      process.stdout.write(JSON.stringify(state.published[version]?.sha));
+      return result(JSON.stringify(state.published[version]?.sha));
     }
   }
   if (args[0] === 'version') {
-    const result = spawnSync(process.execPath, [process.env.REAL_NPM, ...args], { stdio: 'inherit' });
-    process.exit(result.status ?? 1);
+    return originalSpawnSync(process.execPath, [process.env.REAL_NPM, ...args], options);
   }
   if (args[0] === 'run') {
     mkdirSync('dist', { recursive: true }); writeFileSync('dist/index.js', 'built package');
     if (settings.moveMainDuringBuild) { state.mainMoved = true; save(); }
   }
   if (args[0] === 'publish') {
-    if (!existsSync('dist/index.js')) process.exit(43);
+    if (!existsSync('dist/index.js')) return result('', 43);
     const pkg = JSON.parse(readFileSync('package.json'));
     state.published[pkg.version] = { sha: process.env.GITHUB_SHA, version: pkg.version }; save();
   }
@@ -131,23 +147,24 @@ else if (tool === 'npm') {
 else if (tool === 'gh') {
   const tag = args[0] === 'api' ? args[1].split('/').at(-1) : args[2];
   if (args[0] === 'api') {
-    if (state.releases.includes(tag)) process.stdout.write(JSON.stringify({ tag_name: tag }));
-    else { process.stdout.write(JSON.stringify({ status: '404', message: 'Not Found' })); process.exit(1); }
+    if (state.releases.includes(tag)) return result(JSON.stringify({ tag_name: tag }));
+    else return result(JSON.stringify({ status: '404', message: 'Not Found' }), 1);
   } else { state.releases.push(tag); save(); }
 }
+return result();
+};
+syncBuiltinESMExports();
 `);
-  chmodSync(fake, 0o755);
-  for (const tool of ['git', 'svu', 'chglog', 'npm', 'gh']) symlinkSync(fake, join(bin, tool));
+  const gitConfig = join(root, 'empty-gitconfig');
+  writeFileSync(gitConfig, '');
   environment = {
-    ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`,
+    ...process.env,
     RELEASE_FIXTURE: root, REAL_GIT: realGit, REAL_NPM: realNpm,
     GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: sha,
     GITHUB_REPOSITORY: 'digitalxero/cypress-marks', GITHUB_STEP_SUMMARY: join(root, 'summary'),
-    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_GLOBAL: gitConfig,
   };
-});
-
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+}
 
 describe('release workflow gates', () => {
   it.each([
@@ -162,13 +179,16 @@ describe('release workflow gates', () => {
   });
 
   it('waits for build and the whole browser matrix and serializes publishing', () => {
-    expect(workflow.jobs.release.needs).toEqual(expect.arrayContaining(['build', 'compatibility']));
+    expect(workflow.jobs.release.needs).toEqual(expect.arrayContaining(['build', 'compatibility', 'windows-release-tests']));
     expect(workflow.jobs.release.concurrency).toEqual({ group: 'npm-release', 'cancel-in-progress': false });
     expect(workflow.jobs.release.steps.some((step: { run?: string }) => step.run === 'node .repo-policy/npm-release.mjs')).toBe(true);
   });
 });
 
 describe('automatic npm release', () => {
+  beforeEach(setupFixture);
+  afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+
   it('versions the artifact and tags the verified commit without committing to main', () => {
     const result = release();
     expect(result.status, result.stderr).toBe(0);
@@ -189,6 +209,32 @@ describe('automatic npm release', () => {
     expect(calls().filter(call => call[0] === 'npm' && call[1] === 'publish')).toHaveLength(1);
     expect(calls().filter(call => call[0] === 'gh' && call[1] === 'release')).toHaveLength(1);
     expect(git('tag', '--list')).toBe('v0.2.0\nv0.2.1');
+  });
+
+  it('is safe to rerun a successful release from a fresh hosted checkout', () => {
+    expect(release().status).toBe(0);
+    freshCheckout();
+    const result = release();
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls().filter(call => call[0] === 'npm' && call[1] === 'publish')).toHaveLength(1);
+    expect(state().releases).toEqual(['v0.2.1']);
+  });
+
+  it.each(['git:push', 'npm:publish', 'gh:release'])('recovers %s from a fresh hosted checkout', fail => {
+    control({ fail });
+    expect(release().status).not.toBe(0);
+    const hadPublished = Boolean(state().published['0.2.1']);
+    freshCheckout();
+    control();
+    const result = release();
+    expect(result.status, result.stderr).toBe(0);
+    expect(git('ls-remote', 'origin', 'refs/tags/v0.2.1')).toContain(sha);
+    expect(state().published['0.2.1'].sha).toBe(sha);
+    expect(state().releases).toEqual(['v0.2.1']);
+    expect(git('tag', '--list')).not.toContain('v0.2.2');
+    expect(calls().filter(call => call[0] === 'npm' && call[1] === 'publish')).toHaveLength(
+      hadPublished || fail === 'git:push' ? 1 : 2,
+    );
   });
 
   it.each(['v0.3.0', 'v1.0.0'])('publishes the version selected by svu: %s', next => {

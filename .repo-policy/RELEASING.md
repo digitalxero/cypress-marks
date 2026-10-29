@@ -9,9 +9,9 @@ The standalone fallback below does not replace project-specific packaging.
 
 ## cypress-marks automatic release
 
-Every push to `main` runs build/unit checks and the complete Cypress browser
-matrix. Once those succeed, the `ci.yml` release job chooses the next version
-with pinned svu, generates chglog notes, updates npm metadata in its workspace,
+Every push to `main` runs build/unit checks, Windows release tests, and the
+complete Cypress browser matrix. Once those succeed, the `ci.yml` release job
+chooses the next version with pinned svu, generates chglog notes, updates npm metadata in its workspace,
 tags the verified source commit, publishes to npm with OIDC provenance, and
 creates the GitHub release. It does not commit or push version changes to main.
 
