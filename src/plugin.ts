@@ -25,11 +25,27 @@ interface TestInfo {
   suiteTags: string[];
 }
 
+// Use a local compatibility type so consumers can still use older Cypress types.
+type MarksConfig = Cypress.PluginConfigOptions & { expose?: Record<string, unknown> };
+
+function readSetting(config: MarksConfig, key: string): unknown {
+  return config.expose?.[key] ?? config.env?.[key];
+}
+
+function writeSetting(config: MarksConfig, key: string, value: unknown): void {
+  config.expose ??= {};
+  config.expose[key] = value;
+  // Older Cypress versions only send env to the browser.
+  config.env ??= {};
+  config.env[key] = value;
+}
+
 /**
  * Log a message if debug is enabled
  */
 function log(config: Cypress.PluginConfigOptions, message: string): void {
-  const debug = config.env?.marksDebug === true || config.env?.marksDebug === 'true';
+  const setting = readSetting(config, 'marksDebug');
+  const debug = setting === true || setting === 'true';
   if (debug) {
     console.log(`[cypress-marks] ${message}`);
   }
@@ -348,7 +364,7 @@ async function filterSpecFiles(
  * });
  * ```
  *
- * Options (via Cypress env):
+ * Options (via Cypress expose, with env fallback):
  * - `spec`: Pytest-style path filter (file::suite::test)
  * - `tags`: Tag filter expression
  * - `tests`: Test name filter expression
@@ -360,16 +376,23 @@ export async function plugin(
   config: Cypress.PluginConfigOptions,
   options?: PluginOptions
 ): Promise<Cypress.PluginConfigOptions> {
-  const specExpr = config.env?.spec as string | undefined;
-  const tagsExpr = config.env?.tags as string | undefined;
-  const testsExpr = config.env?.tests as string | undefined;
-  const filterSpecs = options?.filterSpecs ?? (config.env?.marksFilterSpecs === true || config.env?.marksFilterSpecs === 'true');
-  const debug = options?.debug ?? (config.env?.marksDebug === true || config.env?.marksDebug === 'true');
+  // Bridge only public cypress-marks settings, never arbitrary env values.
+  for (const key of ['spec', 'tags', 'tests', 'marksFilterSpecs', 'marksOmitFiltered', 'marksDebug']) {
+    const value = readSetting(config, key);
+    if (value !== undefined) writeSetting(config, key, value);
+  }
+
+  const specExpr = readSetting(config, 'spec') as string | undefined;
+  const tagsExpr = readSetting(config, 'tags') as string | undefined;
+  const testsExpr = readSetting(config, 'tests') as string | undefined;
+  const filterSetting = readSetting(config, 'marksFilterSpecs');
+  const debugSetting = readSetting(config, 'marksDebug');
+  const filterSpecs = options?.filterSpecs ?? (filterSetting === true || filterSetting === 'true');
+  const debug = options?.debug ?? (debugSetting === true || debugSetting === 'true');
 
   // Update debug in config for consistent logging
-  if (debug) {
-    config.env = config.env || {};
-    config.env.marksDebug = true;
+  if (options?.debug !== undefined || debug) {
+    writeSetting(config, 'marksDebug', debug);
   }
 
   log(config, 'Plugin initialized');
@@ -396,6 +419,7 @@ export async function plugin(
 
   // Enable filterSpecs automatically if path specs are provided
   const shouldFilterSpecs = filterSpecs || (pathSpecs && pathSpecs.length > 0);
+  let passedPathFilters = false;
 
   // Optionally filter spec files
   if (shouldFilterSpecs) {
@@ -408,7 +432,6 @@ export async function plugin(
 
       // Pass path filters to the browser
       if (result.pathFilters.size > 0) {
-        config.env = config.env || {};
         // Convert Map to array of [specFile, PathFilter] for JSON serialization
         const pathFiltersArray = Array.from(result.pathFilters.entries()).map(
           ([specFile, filter]) => ({
@@ -416,7 +439,8 @@ export async function plugin(
             specs: filter.specs,
           })
         );
-        config.env._marksPathFilters = JSON.stringify(pathFiltersArray);
+        writeSetting(config, '_marksPathFilters', JSON.stringify(pathFiltersArray));
+        passedPathFilters = true;
         log(config, `Passing ${result.pathFilters.size} path filter(s) to browser`);
       }
     } else if (result !== null && result.specs.length === 0) {
@@ -428,14 +452,13 @@ export async function plugin(
     }
   } else {
     log(config, 'Spec filtering not enabled (set marksFilterSpecs=true to enable)');
+  }
 
-    // Even without spec filtering, pass path filters to browser for test-level filtering
-    if (pathSpecs && pathSpecs.length > 0) {
-      config.env = config.env || {};
-      // Store the raw path specs for browser to use
-      config.env._marksPathSpecs = JSON.stringify(pathSpecs);
-      log(config, `Passing ${pathSpecs.length} path spec(s) to browser for test filtering`);
-    }
+  // Fall back to browser filtering when pre-filtering could not produce paths
+  // (for example, when globby or specPattern is unavailable).
+  if (pathSpecs && pathSpecs.length > 0 && !passedPathFilters) {
+    writeSetting(config, '_marksPathSpecs', JSON.stringify(pathSpecs));
+    log(config, `Passing ${pathSpecs.length} path spec(s) to browser for test filtering`);
   }
 
   return config;
