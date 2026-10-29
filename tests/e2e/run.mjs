@@ -26,6 +26,15 @@ const scenarios = [
     passing: 2, pending: 2, specs: 2,
     titles: [['Auth', 'login'], ['Auth', 'slow login']],
   },
+  ...['auth.cy.js', '*.cy.js'].map(file => ({
+    name: `absolute raw path fallback: ${file}`,
+    env: {
+      spec: `${fileURLToPath(new URL(`./specs/${file}`, import.meta.url))}::Auth::login`,
+      _marksTestRawPaths: true,
+    },
+    passing: 2, pending: 2, specs: 2,
+    titles: [['Auth', 'login'], ['Auth', 'slow login']],
+  })),
 ];
 
 const [major, minor] = version.split('.').map(Number);

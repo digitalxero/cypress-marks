@@ -7,7 +7,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function setup(values: Record<string, unknown>, modern = true, specFile = 'cypress/e2e/auth.cy.ts') {
+function setup(
+  values: Record<string, unknown>,
+  modern = true,
+  specFile = 'cypress/e2e/auth.cy.ts',
+  absolute = `/project/${specFile}`,
+) {
   const env = vi.fn((key: string) => {
     if (modern) throw new Error('Cypress.env() was removed in Cypress 16');
     return values[key];
@@ -30,7 +35,7 @@ function setup(values: Record<string, unknown>, modern = true, specFile = 'cypre
   vi.stubGlobal('Cypress', {
     env,
     ...(modern ? { expose } : {}),
-    spec: { relative: specFile, absolute: `/project/${specFile}` },
+    spec: { relative: specFile, absolute },
   });
   vi.stubGlobal('it', originalIt);
   vi.stubGlobal('describe', suite);
@@ -120,5 +125,28 @@ describe('register configuration compatibility', () => {
     globalThis.it('other test', () => {});
     expect(run).not.toHaveBeenCalled();
     expect(skip).toHaveBeenCalledWith('other test');
+  });
+
+  describe.each([true, false])('absolute raw selections with modern API=%s', (modern) => {
+    it.each([
+      { name: 'POSIX exact', pattern: '/project/cypress/e2e/auth.cy.ts', absolute: '/project/cypress/e2e/auth.cy.ts', selected: true },
+      { name: 'POSIX glob', pattern: '/project/cypress/e2e/*.cy.ts', absolute: '/project/cypress/e2e/auth.cy.ts', selected: true },
+      { name: 'Windows exact', pattern: 'C:\\project\\cypress\\e2e\\auth.cy.ts', absolute: 'C:\\project\\cypress\\e2e\\auth.cy.ts', selected: true },
+      { name: 'Windows glob', pattern: 'C:\\project\\cypress\\e2e\\*.cy.ts', absolute: 'C:\\project\\cypress\\e2e\\auth.cy.ts', selected: true },
+      { name: 'different POSIX root', pattern: '/other/cypress/e2e/auth.cy.ts', absolute: '/project/cypress/e2e/auth.cy.ts', selected: false },
+      { name: 'different Windows root', pattern: 'D:\\project\\cypress\\e2e\\auth.cy.ts', absolute: 'C:\\project\\cypress\\e2e\\auth.cy.ts', selected: false },
+    ])('$name', ({ pattern, absolute, selected }) => {
+      const { run, skip, env } = setup({
+        _marksPathSpecs: JSON.stringify(parsePathSpecs(`${pattern}::Auth::login`)),
+      }, modern, 'cypress/e2e/auth.cy.ts', absolute);
+      register();
+      globalThis.describe('Auth', () => {
+        globalThis.it('login', () => {});
+        globalThis.it('logout', () => {});
+      });
+      expect(run.mock.calls.map(call => call[0])).toEqual(selected ? ['login'] : []);
+      expect(skip.mock.calls.map(call => call[0])).toEqual(selected ? ['logout'] : ['login', 'logout']);
+      if (modern) expect(env).not.toHaveBeenCalled();
+    });
   });
 });

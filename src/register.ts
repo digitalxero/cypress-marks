@@ -238,7 +238,9 @@ export function register(): void {
       const pathSpecs = JSON.parse(pathSpecsJson) as PathSpec[];
       const currentSpec = Cypress.spec.relative || Cypress.spec.absolute;
       // Filter specs that match this file
-      const matchingSpecs = pathSpecs.filter(spec => matchesFile(currentSpec, spec));
+      const matchingSpecs = pathSpecs.filter(spec =>
+        matchesFile(currentSpec, spec) || matchesFile(Cypress.spec.absolute, spec)
+      );
       // An empty filter excludes every test in a file outside the selection.
       pathFilter = {
         specFile: currentSpec,
